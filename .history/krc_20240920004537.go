@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"github.com/p2eengineering/kalp-sdk-public/kalpsdk"
 )
+
+
+
+// Define objectType names for prefix
 const balancePrefix = "balance"
 const nftPrefix = "nft"
 const approvalPrefix = "approval"
@@ -511,248 +515,204 @@ func (c *TokenERC721Contract) TotalSupply(ctx kalpsdk.TransactionContextInterfac
 	return totalSupply
 
 }
-// ============== ERC721 enumeration extension ===============
 
-// Set information for a token and initialize contract.
+// ============== ERC721 enumeration extension ===============
+// Set information for a token and intialize contract.
 // param {String} name The name of the token
 // param {String} symbol The symbol of the token
 
 func (c *TokenERC721Contract) Initialize(ctx kalpsdk.TransactionContextInterface, name string, symbol string) (bool, error) {
-    // Authorization check: Allow for configurable minter MSP
-    authorizedMSPIDs := []string{"mailabs"}  // Extendable to include other authorized MSP IDs
-    clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
-    if err != nil {
-        return false, fmt.Errorf("failed to get clientMSPID: %v", err)
-    }
-    
-    if !isAuthorized(clientMSPID, authorizedMSPIDs) {
-        return false, fmt.Errorf("client is not authorized to set the name and symbol of the token")
-    }
+	// Check minter authorization - this sample assumes Org1 is the issuer with privilege to set the name and symbol
+	clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return false, fmt.Errorf("failed to get clientMSPID: %v", err)
+	}
+	if clientMSPID != "mailabs" {
+		return false, fmt.Errorf("client is not authorized to set the name and symbol of the token")
+	}
 
-    // Check if contract is already initialized
-    contractInitialized, err := checkInitialized(ctx)
-    if err != nil {
-        return false, fmt.Errorf("failed to check initialization status: %v", err)
-    }
-    if contractInitialized {
-        return false, fmt.Errorf("contract is already initialized")
-    }
+	bytes, err := ctx.GetState(nameKey)
+	if err != nil {
+		return false, fmt.Errorf("failed to get Name: %v", err)
+	}
+	if bytes != nil {
+		return false, fmt.Errorf("contract options are already set, client is not authorized to change them")
+	}
 
-    // Set token name and symbol
-    err = ctx.PutState(nameKey, []byte(name))
-    if err != nil {
-        return false, fmt.Errorf("failed to set name in state: %v", err)
-    }
+	err = ctx.PutStateWithoutKYC(nameKey, []byte(name))
+	if err != nil {
+		return false, fmt.Errorf("failed to PutState nameKey %s: %v", nameKey, err)
+	}
 
-    err = ctx.PutState(symbolKey, []byte(symbol))
-    if err != nil {
-        return false, fmt.Errorf("failed to set symbol in state: %v", err)
-    }
+	err = ctx.PutStateWithoutKYC(symbolKey, []byte(symbol))
+	if err != nil {
+		return false, fmt.Errorf("failed to PutState symbolKey %s: %v", symbolKey, err)
+	}
 
-    // Mark the contract as initialized
-    err = ctx.PutState(initializationKey, []byte{'\u0001'})  // Using a simple flag to mark initialization
-    if err != nil {
-        return false, fmt.Errorf("failed to set initialization flag: %v", err)
-    }
-
-    return true, nil
+	return true, nil
 }
 
 // Mint a new non-fungible token
-// param {String} tokenId Unique ID of the non-fungible token to be minted
+// param {String} tokenId Unique ID of the non-fungible token to be mintedget
 // param {String} tokenURI URI containing metadata of the minted non-fungible token
 // returns {Object} Return the non-fungible token object
 
 func (c *TokenERC721Contract) MintWithTokenURI(ctx kalpsdk.TransactionContextInterface, tokenId string, tokenURI string) (*Nft, error) {
-    // Ensure the contract has been initialized
-    initialized, err := checkInitialized(ctx)
-    if err != nil {
-        return nil, fmt.Errorf("failed to check if contract is initialized: %v", err)
-    }
-    if !initialized {
-        return nil, fmt.Errorf("contract must be initialized before minting tokens")
-    }
 
-    // Authorization check: Allow only authorized MSPs to mint tokens
-    authorizedMSPIDs := []string{"mailabs"}  // Extendable to include other authorized MSP IDs
-    clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
-    if err != nil {
-        return nil, fmt.Errorf("failed to get clientMSPID: %v", err)
-    }
+	// Check if contract has been intilized first
+	initialized, err := checkInitialized(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if contract is already initialized: %v", err)
+	}
+	if !initialized {
+		return nil, fmt.Errorf("contract options need to be set before calling any function, call Initialize() to initialize contract")
+	}
 
-    if !isAuthorized(clientMSPID, authorizedMSPIDs) {
-        return nil, fmt.Errorf("client is not authorized to mint tokens")
-    }
+	// Check minter authorization - this sample assumes Org1 is the issuer with privilege to mint a new token
+	clientMSPID, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clientMSPID: %v", err)
+	}
 
-    // Get ID of the submitting client identity (minter)
-    minter, err := ctx.GetUserID()
-    if err != nil {
-        return nil, fmt.Errorf("failed to get minter ID: %v", err)
-    }
+	if clientMSPID != "mailabs" {
+		return nil, fmt.Errorf("client is not authorized to set the name and symbol of the token")
+	}
 
-    // Check if the token already exists
-    tokenExists := _nftExists(ctx, tokenId)
-    if tokenExists {
-        return nil, fmt.Errorf("token %s has already been minted", tokenId)
-    }
+	// Get ID of submitting client identity
+	minter, err := ctx.GetUserID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get minter id: %v", err)
+	}
 
-    // Create a new NFT object
-    nft := &Nft{
-        TokenId:  tokenId,
-        Owner:    minter,
-        TokenURI: tokenURI,
-    }
+	// Check if the token to be minted does not exist
+	exists := _nftExists(ctx, tokenId)
+	if exists {
+		return nil, fmt.Errorf("the token %s is already minted.: %v", tokenId, err)
+	}
 
-    // Store the new NFT in the ledger
-    nftKey, err := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    if err != nil {
-        return nil, fmt.Errorf("failed to create composite key for NFT: %v", err)
-    }
+	// Add a non-fungible token
+	nft := new(Nft)
+	nft.TokenId = tokenId
+	nft.Owner = minter
+	nft.TokenURI = tokenURI
 
-    nftBytes, err := json.Marshal(nft)
-    if err != nil {
-        return nil, fmt.Errorf("failed to marshal NFT: %v", err)
-    }
+	nftKey, err := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
+	if err != nil {
+		return nil, fmt.Errorf("failed to CreateCompositeKey to nftKey: %v", err)
+	}
 
-    err = ctx.PutState(nftKey, nftBytes)
-    if err != nil {
-        return nil, fmt.Errorf("failed to store NFT in state: %v", err)
-    }
+	nftBytes, err := json.Marshal(nft)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal nft: %v", err)
+	}
 
-    // Set the minter's balance for the token
-    balanceKey, err := ctx.CreateCompositeKey(balancePrefix, []string{minter, tokenId})
-    if err != nil {
-        return nil, fmt.Errorf("failed to create balance key: %v", err)
-    }
+	err = ctx.PutStateWithoutKYC(nftKey, nftBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to PutState nftBytes %s: %v", nftBytes, err)
+	}
 
-    err = ctx.PutState(balanceKey, []byte{'\u0000'})
-    if err != nil {
-        return nil, fmt.Errorf("failed to set balance in state: %v", err)
-    }
+	// A composite key would be balancePrefix.owner.tokenId, which enables partial
+	// composite key query to find and count all records matching balance.owner.*
+	// An empty value would represent a delete, so we simply insert the null character.
 
-    // Emit a Transfer event for minting from "0x0" to the minter
-    transferEvent := &Transfer{
-        From:    "0x0",
-        To:      minter,
-        TokenId: tokenId,
-    }
+	balanceKey, err := ctx.CreateCompositeKey(balancePrefix, []string{minter, tokenId})
+	if err != nil {
+		return nil, fmt.Errorf("failed to CreateCompositeKey to balanceKey: %v", err)
+	}
 
-    transferEventBytes, err := json.Marshal(transferEvent)
-    if err != nil {
-        return nil, fmt.Errorf("failed to marshal transfer event: %v", err)
-    }
+	err = ctx.PutStateWithoutKYC(balanceKey, []byte{'\u0000'})
+	if err != nil {
+		return nil, fmt.Errorf("failed to PutState balanceKey %s: %v", nftBytes, err)
+	}
 
-    err = ctx.SetEvent("Transfer", transferEventBytes)
-    if err != nil {
-        return nil, fmt.Errorf("failed to set transfer event: %v", err)
-    }
+	// Emit the Transfer event
+	transferEvent := new(Transfer)
+	transferEvent.From = "0x0"
+	transferEvent.To = minter
+	transferEvent.TokenId = tokenId
 
-    // Return the newly minted NFT
-    return nft, nil
-}
+	transferEventBytes, err := json.Marshal(transferEvent)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal transferEventBytes: %v", err)
+	}
 
-// Helper functions
+	err = ctx.SetEvent("Transfer", transferEventBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to SetEvent transferEventBytes %s: %v", transferEventBytes, err)
+	}
 
-// Check if the contract has been initialized
-func checkInitialized(ctx kalpsdk.TransactionContextInterface) (bool, error) {
-    bytes, err := ctx.GetState(initializationKey)
-    if err != nil {
-        return false, fmt.Errorf("failed to check initialization status: %v", err)
-    }
-    return bytes != nil && bytes[0] == '\u0001', nil
-}
-
-// Check if the NFT with a given tokenId already exists
-func _nftExists(ctx kalpsdk.TransactionContextInterface, tokenId string) bool {
-    nftKey, _ := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    nftBytes, err := ctx.GetState(nftKey)
-    return err == nil && nftBytes != nil
-}
-
-// Check if the client MSPID is authorized
-func isAuthorized(clientMSPID string, authorizedMSPIDs []string) bool {
-    for _, authorizedMSPID := range authorizedMSPIDs {
-        if clientMSPID == authorizedMSPID {
-            return true
-        }
-    }
-    return false
+	return nft, nil
 }
 
 // Burn a non-fungible token
 // param {String} tokenId Unique ID of a non-fungible token
 // returns {Boolean} Return whether the burn was successful or not
-// Burn permanently removes an NFT from the Kalp ecosystem, effectively destroying the token and revoking its ownership.
 func (c *TokenERC721Contract) Burn(ctx kalpsdk.TransactionContextInterface, tokenId string) (bool, error) {
 
-    // Check if the contract has been initialized
-    initialized, err := checkInitialized(ctx)
-    if err != nil {
-        return false, fmt.Errorf("failed to check if contract is initialized: %v", err)
-    }
-    if !initialized {
-        return false, fmt.Errorf("contract options need to be set before calling any function, call Initialize() to initialize the contract")
-    }
+	// Check if contract has been intilized first
+	initialized, err := checkInitialized(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if contract is already initialized: %v", err)
+	}
+	if !initialized {
+		return false, fmt.Errorf("contract options need to be set before calling any function, call Initialize() to initialize contract")
+	}
 
-    // Get the ID of the user making the request
-    owner, err := ctx.GetUserID()
-    if err != nil {
-        return false, fmt.Errorf("failed to retrieve client identity (owner): %v", err)
-    }
+	owner, err := ctx.GetUserID()
+	if err != nil {
+		return false, fmt.Errorf("failed to GetClientIdentity owner64: %v", err)
+	}
 
-    // Retrieve the NFT from the ledger
-    nft, err := _readNFT(ctx, tokenId)
-    if err != nil {
-        return false, fmt.Errorf("failed to retrieve NFT with ID %s: %v", tokenId, err)
-    }
 
-    // Verify that the caller is the owner of the NFT
-    if nft.Owner != owner {
-        return false, fmt.Errorf("caller does not own the NFT with ID %s", tokenId)
-    }
+	// Check if a caller is the owner of the non-fungible token
+	nft, err := _readNFT(ctx, tokenId)
+	if err != nil {
+		return false, fmt.Errorf("failed to _readNFT nft : %v", err)
+	}
+	if nft.Owner != owner {
+		return false, fmt.Errorf("non-fungible token %s is not owned by %s", tokenId, owner)
+	}
 
-    // Delete the NFT from the ledger
-    nftKey, err := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    if err != nil {
-        return false, fmt.Errorf("failed to create composite key for NFT: %v", err)
-    }
+	// Delete the token
+	nftKey, err := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
+	if err != nil {
+		return false, fmt.Errorf("failed to CreateCompositeKey tokenId: %v", err)
+	}
 
-    err = ctx.DelStateWithoutKYC(nftKey)
-    if err != nil {
-        return false, fmt.Errorf("failed to delete NFT from state: %v", err)
-    }
+	err = ctx.DelStateWithoutKYC(nftKey)
+	if err != nil {
+		return false, fmt.Errorf("failed to DelState nftKey: %v", err)
+	}
 
-    // Delete the owner's balance record for this token
-    balanceKey, err := ctx.CreateCompositeKey(balancePrefix, []string{owner, tokenId})
-    if err != nil {
-        return false, fmt.Errorf("failed to create composite key for owner's balance: %v", err)
-    }
+	// Remove a composite key from the balance of the owner
+	balanceKey, err := ctx.CreateCompositeKey(balancePrefix, []string{owner, tokenId})
+	if err != nil {
+		return false, fmt.Errorf("failed to CreateCompositeKey balanceKey %s: %v", balanceKey, err)
+	}
 
-    err = ctx.DelStateWithoutKYC(balanceKey)
-    if err != nil {
-        return false, fmt.Errorf("failed to delete owner's balance for token: %v", err)
-    }
+	err = ctx.DelStateWithoutKYC(balanceKey)
+	if err != nil {
+		return false, fmt.Errorf("failed to DelState balanceKey %s: %v", balanceKey, err)
+	}
 
-    // Emit a Transfer event to signal that the token has been "burned"
-    transferEvent := &Transfer{
-        From:    owner,
-        To:      "0x0",   // Transfer to "0x0" signifies burning the token
-        TokenId: tokenId,
-    }
+	// Emit the Transfer event
+	transferEvent := new(Transfer)
+	transferEvent.From = owner
+	transferEvent.To = "0x0"
+	transferEvent.TokenId = tokenId
 
-    transferEventBytes, err := json.Marshal(transferEvent)
-    if err != nil {
-        return false, fmt.Errorf("failed to marshal transfer event: %v", err)
-    }
+	transferEventBytes, err := json.Marshal(transferEvent)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal transferEventBytes: %v", err)
+	}
 
-    err = ctx.SetEvent("Transfer", transferEventBytes)
-    if err != nil {
-        return false, fmt.Errorf("failed to set transfer event: %v", err)
-    }
+	err = ctx.SetEvent("Transfer", transferEventBytes)
+	if err != nil {
+		return false, fmt.Errorf("failed to SetEvent transferEventBytes: %v", err)
+	}
 
-    return true, nil
+	return true, nil
 }
-
 
 // ClientAccountBalance returns the balance of the requesting client's account.
 // returns {Number} Returns the account balance
@@ -776,67 +736,6 @@ func (c *TokenERC721Contract) ClientAccountBalance(ctx kalpsdk.TransactionContex
 	
 
 	return c.BalanceOf(ctx, clientAccountID), nil
-}
-
-func (c *TokenERC721Contract) TransferFrom(ctx kalpsdk.TransactionContextInterface, from string, to string, tokenId string) (bool, error) {
-    nft, _ := _readNFT(ctx, tokenId)
-    nft.Owner = to
-    nftKey, _ := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    nftBytes, _ := json.Marshal(nft)
-    ctx.PutStateWithoutKYC(nftKey, nftBytes)
-    return true, nil
-}
-
-func (c *TokenERC721Contract) Approve(ctx kalpsdk.TransactionContextInterface, operator string, tokenId string) (bool, error) {
-    nft, _ := _readNFT(ctx, tokenId)
-    nft.Approved = operator
-    nftKey, _ := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    nftBytes, _ := json.Marshal(nft)
-    ctx.PutStateWithoutKYC(nftKey, nftBytes)
-    return true, nil
-}
-
-func (c *TokenERC721Contract) SetApprovalForAll(ctx kalpsdk.TransactionContextInterface, operator string, approved bool) (bool, error) {
-    sender := /* Fetch sender's identity */
-    approvalKey, _ := ctx.CreateCompositeKey(approvalPrefix, []string{sender, operator})
-    approval := Approval{Owner: sender, Operator: operator, Approved: approved}
-    approvalBytes, _ := json.Marshal(approval)
-    ctx.PutStateWithoutKYC(approvalKey, approvalBytes)
-    return true, nil
-}
-
-func (c *TokenERC721Contract) BalanceOf(ctx kalpsdk.TransactionContextInterface, owner string) int {
-    iterator, _ := ctx.GetStateByPartialCompositeKey(balancePrefix, []string{owner})
-    balance := 0
-    for iterator.HasNext() {
-        iterator.Next()
-        balance++
-    }
-    return balance
-}
-
-func (c *TokenERC721Contract) OwnerOf(ctx kalpsdk.TransactionContextInterface, tokenId string) (string, error) {
-    nft, err := _readNFT(ctx, tokenId)
-    if err != nil {
-        return "", err
-    }
-    return nft.Owner, nil
-}
-
-func (c *TokenERC721Contract) Name(ctx kalpsdk.TransactionContextInterface) (string, error) {
-    bytes, err := ctx.GetState(nameKey)
-    if err != nil {
-        return "", err
-    }
-    return string(bytes), nil
-}
-
-func (c *TokenERC721Contract) Symbol(ctx kalpsdk.TransactionContextInterface) (string, error) {
-    bytes, err := ctx.GetState(symbolKey)
-    if err != nil {
-        return "", err
-    }
-    return string(bytes), nil
 }
 
 // ClientAccountID returns the id of the requesting client's account.
