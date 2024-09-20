@@ -779,97 +779,40 @@ func (c *TokenERC721Contract) ClientAccountBalance(ctx kalpsdk.TransactionContex
 }
 
 func (c *TokenERC721Contract) TransferFrom(ctx kalpsdk.TransactionContextInterface, from string, to string, tokenId string) (bool, error) {
-    nft, err := _readNFT(ctx, tokenId)
-    if err != nil {
-        return false, err
-    }
-
+    nft, _ := _readNFT(ctx, tokenId)
     nft.Owner = to
-    nftKey, err := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    if err != nil {
-        return false, err
-    }
-
-    nftBytes, err := json.Marshal(nft)
-    if err != nil {
-        return false, err
-    }
-
-    err = ctx.PutStateWithoutKYC(nftKey, nftBytes)
-    if err != nil {
-        return false, err
-    }
-
+    nftKey, _ := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
+    nftBytes, _ := json.Marshal(nft)
+    ctx.PutStateWithoutKYC(nftKey, nftBytes)
     return true, nil
 }
 
 func (c *TokenERC721Contract) Approve(ctx kalpsdk.TransactionContextInterface, operator string, tokenId string) (bool, error) {
-    nft, err := _readNFT(ctx, tokenId)
-    if err != nil {
-        return false, err
-    }
-
+    nft, _ := _readNFT(ctx, tokenId)
     nft.Approved = operator
-    nftKey, err := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
-    if err != nil {
-        return false, err
-    }
-
-    nftBytes, err := json.Marshal(nft)
-    if err != nil {
-        return false, err
-    }
-
-    err = ctx.PutStateWithoutKYC(nftKey, nftBytes)
-    if err != nil {
-        return false, err
-    }
-
+    nftKey, _ := ctx.CreateCompositeKey(nftPrefix, []string{tokenId})
+    nftBytes, _ := json.Marshal(nft)
+    ctx.PutStateWithoutKYC(nftKey, nftBytes)
     return true, nil
 }
 
 func (c *TokenERC721Contract) SetApprovalForAll(ctx kalpsdk.TransactionContextInterface, operator string, approved bool) (bool, error) {
-    sender, err := ctx.GetSender() // Fetch sender's identity
-    if err != nil {
-        return false, err
-    }
-
-    approvalKey, err := ctx.CreateCompositeKey(approvalPrefix, []string{sender, operator})
-    if err != nil {
-        return false, err
-    }
-
+    sender := /* Fetch sender's identity */
+    approvalKey, _ :h= ctx.CreateCompositeKey(approvalPrefix, []string{sender, operator})
     approval := Approval{Owner: sender, Operator: operator, Approved: approved}
-    approvalBytes, err := json.Marshal(approval)
-    if err != nil {
-        return false, err
-    }
-
-    err = ctx.PutStateWithoutKYC(approvalKey, approvalBytes)
-    if err != nil {
-        return false, err
-    }
-
+    approvalBytes, _ := json.Marshal(approval)
+    ctx.PutStateWithoutKYC(approvalKey, approvalBytes)
     return true, nil
 }
 
-func (c *TokenERC721Contract) BalanceOf(ctx kalpsdk.TransactionContextInterface, owner string) (int, error) {
-    iterator, err := ctx.GetStateByPartialCompositeKey(balancePrefix, []string{owner})
-    if err != nil {
-        return 0, err
-    }
-    defer iterator.Close()
-
+func (c *TokenERC721Contract) BalanceOf(ctx kalpsdk.TransactionContextInterface, owner string) int {
+    iterator, _ := ctx.GetStateByPartialCompositeKey(balancePrefix, []string{owner})
     balance := 0
     for iterator.HasNext() {
-        _, err := iterator.Next()
-        if err != nil {
-            return 0, err
-        }
+        iterator.Next()
         balance++
     }
-
-    return balance, nil
+    return balance
 }
 
 func (c *TokenERC721Contract) OwnerOf(ctx kalpsdk.TransactionContextInterface, tokenId string) (string, error) {
@@ -895,7 +838,6 @@ func (c *TokenERC721Contract) Symbol(ctx kalpsdk.TransactionContextInterface) (s
     }
     return string(bytes), nil
 }
-
 
 // ClientAccountID returns the id of the requesting client's account.
 // In this implementation, the client account ID is the clientId itself.
